@@ -8,7 +8,7 @@ from openapi_schema_validator import _types as oas_types
 from openapi_schema_validator import _validators as oas_validators
 from openapi_schema_validator._types import oas31_type_checker
 
-BaseOAS30Validator = create(
+OAS30Validator = create(
     meta_schema=_utils.load_schema("draft4"),
     validators={
         u"multipleOf": _validators.multipleOf,
@@ -54,9 +54,10 @@ BaseOAS30Validator = create(
     # See https://github.com/p1c2u/openapi-schema-validator/pull/12
     # version="oas30",
     id_of=lambda schema: schema.get(u"id", ""),
+    applicable_validators=oas_validators.include_nullable_validator,
 )
 
-BaseOAS31Validator = extend(
+OAS31Validator = extend(
     Draft202012Validator,
     {
         # adjusted to OAS
@@ -75,26 +76,19 @@ BaseOAS31Validator = extend(
 )
 
 
-@attrs
-class OAS30Validator(BaseOAS30Validator):
+def _patch_validator_with_read_write_context(cls):
+    """Adds read/write context to jsonschema validator class"""
+    # subclassing validator classes is not intended to
+    # be part of their public API and will raise error
+    # See https://github.com/p1c2u/openapi-schema-validator/issues/48
+    original_init = cls.__init__
 
-    read: bool = attrib(default=None)
-    write: bool = attrib(default=None)
+    def __init__(self, *args, **kwargs):
+        self.read = kwargs.pop("read", None)
+        self.write = kwargs.pop("write", None)
+        original_init(self, *args, **kwargs)
 
-    def iter_errors(self, instance, _schema=None):
-        if _schema is None:
-            # creates a copy by value from schema to prevent mutation
-            _schema = deepcopy(self.schema)
-
-        # append defaults to trigger validator (i.e. nullable)
-        if 'nullable' not in _schema:
-            _schema.update({
-                'nullable': False,
-            })
-
-        validator = self.evolve(schema=_schema)
-        return super(OAS30Validator, validator).iter_errors(instance)
+    cls.__init__ = __init__
 
 
-class OAS31Validator(BaseOAS31Validator):
-    pass
+_patch_validator_with_read_write_context(OAS30Validator)
