@@ -1,6 +1,6 @@
+import warnings
 from typing import Any
 from typing import Type
-import warnings
 
 from jsonschema import _legacy_validators
 from jsonschema import _utils
@@ -10,6 +10,7 @@ from jsonschema.validators import Draft202012Validator
 from jsonschema.validators import create
 from jsonschema.validators import extend
 
+from openapi_schema_validator import _format as oas_format
 from openapi_schema_validator import _types as oas_types
 from openapi_schema_validator import _validators as oas_validators
 from openapi_schema_validator._types import oas31_type_checker
@@ -55,6 +56,7 @@ OAS30Validator = create(
         "deprecated": oas_validators.not_implemented,
     },
     type_checker=oas_types.oas30_type_checker,
+    format_checker=oas_format.oas30_format_checker,
     # NOTE: version causes conflict with global jsonschema validator
     # See https://github.com/p1c2u/openapi-schema-validator/pull/12
     # version="oas30",
@@ -86,7 +88,6 @@ OAS31Validator = extend(
         "oneOf": oas_validators.oneOf,
         "anyOf": oas_validators.anyOf,
         "description": oas_validators.not_implemented,
-        "format": oas_validators.format,
         # fixed OAS fields
         "discriminator": oas_validators.not_implemented,
         "xml": oas_validators.not_implemented,
@@ -94,6 +95,7 @@ OAS31Validator = extend(
         "example": oas_validators.not_implemented,
     },
     type_checker=oas31_type_checker,
+    format_checker=oas_format.oas31_format_checker,
 )
 
 
