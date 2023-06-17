@@ -53,7 +53,7 @@ def handle_discriminator(
         return
 
     try:
-        validator.resolver.resolve(ref)
+        validator._validate_reference(ref=ref, instance=instance)
     except:
         yield ValidationError(
             f"{instance!r} reference {ref!r} could not be resolved",
@@ -264,4 +264,5 @@ def not_implemented(
     instance: Any,
     schema: Mapping[Hashable, Any],
 ) -> Iterator[ValidationError]:
-    pass
+    return
+    yield

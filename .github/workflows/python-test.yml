@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11']
+        python-version: ['3.8', '3.9', '3.10', '3.11']
       fail-fast: false
     steps:
       - uses: actions/checkout@v2
@@ -28,10 +28,8 @@ jobs:
         id: full-python-version
         run: echo ::set-output name=version::$(python -c "import sys; print('-'.join(str(v) for v in sys.version_info))")
 
-      - name: Bootstrap poetry
-        run: |
-          curl -sL https://raw.githubusercontent.com/python-poetry/poetry/master/install-poetry.py | python - -y
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Set up poetry
+        uses: Gr1N/setup-poetry@v8
 
       - name: Configure poetry
         run: poetry config virtualenvs.in-project true
@@ -48,7 +46,7 @@ jobs:
         run: timeout 10s poetry run pip --version || rm -rf .venv
 
       - name: Install dependencies
-        run: poetry install
+        run: poetry install --all-extras
 
       - name: Test
         env:
@@ -57,6 +55,9 @@ jobs:
 
       - name: Static type check
         run: poetry run mypy
+
+      - name: Check dependencies
+        run: poetry run deptry .
 
       - name: Upload coverage
         uses: codecov/codecov-action@v1
@@ -77,10 +78,8 @@ jobs:
         id: full-python-version
         run: echo ::set-output name=version::$(python -c "import sys; print('-'.join(str(v) for v in sys.version_info))")
 
-      - name: Bootstrap poetry
-        run: |
-          curl -sL https://raw.githubusercontent.com/python-poetry/poetry/master/install-poetry.py | python - -y
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Set up poetry
+        uses: Gr1N/setup-poetry@v8
 
       - name: Configure poetry
         run: poetry config virtualenvs.in-project true

@@ -3,12 +3,11 @@ from typing import Any
 from typing import Type
 
 from jsonschema import _legacy_validators
-from jsonschema import _utils
 from jsonschema import _validators
-from jsonschema.protocols import Validator
 from jsonschema.validators import Draft202012Validator
 from jsonschema.validators import create
 from jsonschema.validators import extend
+from jsonschema_specifications import REGISTRY as SPECIFICATIONS
 
 from openapi_schema_validator import _format as oas_format
 from openapi_schema_validator import _types as oas_types
@@ -16,7 +15,9 @@ from openapi_schema_validator import _validators as oas_validators
 from openapi_schema_validator._types import oas31_type_checker
 
 OAS30Validator = create(
-    meta_schema=_utils.load_schema("draft4"),
+    meta_schema=SPECIFICATIONS.contents(
+        "http://json-schema.org/draft-04/schema#",
+    ),
     validators={
         "multipleOf": _validators.multipleOf,
         # exclusiveMaximum supported inside maximum_draft3_draft4
@@ -97,41 +98,3 @@ OAS31Validator = extend(
     type_checker=oas31_type_checker,
     format_checker=oas_format.oas31_format_checker,
 )
-
-
-def _patch_validator_with_read_write_context(cls: Type[Validator]) -> None:
-    """Adds read/write context to jsonschema validator class"""
-    # subclassing validator classes is not intended to
-    # be part of their public API and will raise error
-    # See https://github.com/python-openapi/openapi-schema-validator/issues/48
-    original_init = cls.__init__
-    original_evolve = cls.evolve
-
-    def __init__(self: Validator, *args: Any, **kwargs: Any) -> None:
-        self.read = kwargs.pop("read", None)
-        if self.read is not None:
-            warnings.warn(
-                "read property is deprecated. "
-                "Use OAS30ReadValidator instead.",
-                DeprecationWarning,
-            )
-        self.write = kwargs.pop("write", None)
-        if self.write is not None:
-            warnings.warn(
-                "write property is deprecated. "
-                "Use OAS30WriteValidator instead.",
-                DeprecationWarning,
-            )
-        original_init(self, *args, **kwargs)
-
-    def evolve(self: Validator, **changes: Any) -> Validator:
-        validator = original_evolve(self, **changes)
-        validator.read = self.read
-        validator.write = self.write
-        return validator
-
-    cls.__init__ = __init__
-    cls.evolve = evolve
-
-
-_patch_validator_with_read_write_context(OAS30Validator)

@@ -2,6 +2,9 @@ from base64 import b64encode
 
 import pytest
 from jsonschema import ValidationError
+from referencing import Registry
+from referencing import Resource
+from referencing.jsonschema import DRAFT202012
 
 from openapi_schema_validator import OAS30ReadValidator
 from openapi_schema_validator import OAS30Validator
@@ -34,6 +37,53 @@ class TestOAS30ValidatorFormatChecker:
 
 
 class BaseTestOASValidatorValidate:
+    @pytest.mark.parametrize(
+        "format,value",
+        [
+            ("int32", "test"),
+            ("int32", True),
+            ("int32", 3.12),
+            ("int32", ["test"]),
+            ("int64", "test"),
+            ("int64", True),
+            ("int64", 3.12),
+            ("int64", ["test"]),
+            ("float", "test"),
+            ("float", 3),
+            ("float", True),
+            ("float", ["test"]),
+            ("double", "test"),
+            ("double", 3),
+            ("double", True),
+            ("double", ["test"]),
+            ("password", 3.12),
+            ("password", True),
+            ("password", 3),
+            ("password", ["test"]),
+        ],
+    )
+    def test_formats_ignored(
+        self, format, value, validator_class, format_checker
+    ):
+        schema = {"format": format}
+        validator = validator_class(schema, format_checker=format_checker)
+
+        result = validator.validate(value)
+
+        assert result is None
+
+    @pytest.mark.parametrize("format", ["float", "double"])
+    @pytest.mark.parametrize("value", [3, 3.14, 1.0])
+    def test_number_float_and_double_valid(
+        self, format, value, validator_class, format_checker
+    ):
+        schema = {"type": "number", "format": format}
+        validator = validator_class(schema, format_checker=format_checker)
+
+        result = validator.validate(value)
+
+        assert result is None
+
     @pytest.mark.parametrize("value", ["test"])
     def test_string(self, validator_class, value):
         schema = {"type": "string"}
@@ -51,6 +101,51 @@ class BaseTestOASValidatorValidate:
         with pytest.raises(ValidationError):
             validator.validate(value)
 
+    def test_referencing(self, validator_class):
+        name_schema = Resource.from_contents(
+            {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "string",
+            }
+        )
+        age_schema = DRAFT202012.create_resource(
+            {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0,
+                "maximum": 120,
+            }
+        )
+        birth_date_schema = Resource.from_contents(
+            {
+                "type": "string",
+                "format": "date",
+            },
+            default_specification=DRAFT202012,
+        )
+        registry = Registry().with_resources(
+            [
+                ("urn:name-schema", name_schema),
+                ("urn:age-schema", age_schema),
+                ("urn:birth-date-schema", birth_date_schema),
+            ],
+        )
+        schema = {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+                "name": {"$ref": "urn:name-schema"},
+                "age": {"$ref": "urn:age-schema"},
+                "birth-date": {"$ref": "urn:birth-date-schema"},
+            },
+            "additionalProperties": False,
+        }
+
+        validator = validator_class(schema, registry=registry)
+        result = validator.validate({"name": "John", "age": 23}, schema)
+
+        assert result is None
+
 
 class TestOAS30ValidatorValidate(BaseTestOASValidatorValidate):
     @pytest.fixture
@@ -60,6 +155,29 @@ class TestOAS30ValidatorValidate(BaseTestOASValidatorValidate):
     @pytest.fixture
     def format_checker(self):
         return oas30_format_checker
+
+    @pytest.mark.parametrize(
+        "format,value",
+        [
+            ("binary", True),
+            ("binary", 3),
+            ("binary", 3.12),
+            ("binary", ["test"]),
+            ("byte", True),
+            ("byte", 3),
+            ("byte", 3.12),
+            ("byte", ["test"]),
+        ],
+    )
+    def test_oas30_formats_ignored(
+        self, format, value, validator_class, format_checker
+    ):
+        schema = {"format": format}
+        validator = validator_class(schema, format_checker=format_checker)
+
+        result = validator.validate(value)
+
+        assert result is None
 
     @pytest.mark.xfail(reason="OAS 3.0 string type checker allows byte")
     @pytest.mark.parametrize("value", [b"test"])
@@ -213,90 +331,6 @@ class TestOAS30ValidatorValidate(BaseTestOASValidatorValidate):
         ):
             validator.validate({"another_prop": "bla"})
         assert validator.validate({"some_prop": "hello"}) is None
-
-    def test_read_only(self, validator_class):
-        schema = {
-            "type": "object",
-            "properties": {"some_prop": {"type": "string", "readOnly": True}},
-        }
-
-        with pytest.warns(DeprecationWarning):
-            validator = validator_class(
-                schema, format_checker=oas30_format_checker, write=True
-            )
-        with pytest.raises(
-            ValidationError,
-            match="Tried to write read-only property with hello",
-        ):
-            validator.validate({"some_prop": "hello"})
-        with pytest.warns(DeprecationWarning):
-            validator = validator_class(
-                schema, format_checker=oas30_format_checker, read=True
-            )
-        assert validator.validate({"some_prop": "hello"}) is None
-
-    def test_write_only(self, validator_class):
-        schema = {
-            "type": "object",
-            "properties": {"some_prop": {"type": "string", "writeOnly": True}},
-        }
-
-        with pytest.warns(DeprecationWarning):
-            validator = validator_class(
-                schema, format_checker=oas30_format_checker, read=True
-            )
-        with pytest.raises(
-            ValidationError,
-            match="Tried to read write-only property with hello",
-        ):
-            validator.validate({"some_prop": "hello"})
-        with pytest.warns(DeprecationWarning):
-            validator = validator_class(
-                schema, format_checker=oas30_format_checker, write=True
-            )
-        assert validator.validate({"some_prop": "hello"}) is None
-
-    def test_required_read_only(self, validator_class):
-        schema = {
-            "type": "object",
-            "properties": {"some_prop": {"type": "string", "readOnly": True}},
-            "required": ["some_prop"],
-        }
-
-        with pytest.warns(DeprecationWarning):
-            validator = validator_class(
-                schema, format_checker=oas30_format_checker, read=True
-            )
-        with pytest.raises(
-            ValidationError, match="'some_prop' is a required property"
-        ):
-            validator.validate({"another_prop": "hello"})
-        with pytest.warns(DeprecationWarning):
-            validator = validator_class(
-                schema, format_checker=oas30_format_checker, write=True
-            )
-        assert validator.validate({"another_prop": "hello"}) is None
-
-    def test_required_write_only(self, validator_class):
-        schema = {
-            "type": "object",
-            "properties": {"some_prop": {"type": "string", "writeOnly": True}},
-            "required": ["some_prop"],
-        }
-
-        with pytest.warns(DeprecationWarning):
-            validator = validator_class(
-                schema, format_checker=oas30_format_checker, write=True
-            )
-        with pytest.raises(
-            ValidationError, match="'some_prop' is a required property"
-        ):
-            validator.validate({"another_prop": "hello"})
-        with pytest.warns(DeprecationWarning):
-            validator = validator_class(
-                schema, format_checker=oas30_format_checker, read=True
-            )
-        assert validator.validate({"another_prop": "hello"}) is None
 
     def test_oneof_required(self, validator_class):
         instance = {
