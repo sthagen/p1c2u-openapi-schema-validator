@@ -57,19 +57,19 @@ include = [
 python = "^3.8.0"
 jsonschema = "^4.19.1"
 rfc3339-validator = "*" # requred by jsonschema for date-time checker
-jsonschema-specifications = "^2023.5.2"
+jsonschema-specifications = ">=2023.5.2"
 
 [tool.poetry.extras]
 docs = ["sphinx", "sphinx-immaterial"]
 
 [tool.poetry.dev-dependencies]
-black = "^23.10.1"
+black = "^23.11.0"
 isort = "^5.9.1"
 pre-commit = "*"
 pytest = "^7"
 pytest-flake8 = "*"
 pytest-cov = "*"
-mypy = "^1.6"
+mypy = "^1.7"
 flynt = "^1.0"
 deptry = "^0.12.0"
 bump2version = "^1.0.1"
