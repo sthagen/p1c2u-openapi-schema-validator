@@ -540,9 +540,9 @@ class TestOAS30ValidatorValidate(BaseTestOASValidatorValidate):
             "$defs": {
                 "NullableText": {
                     "type": "string",
-                    "nullable": False
-                    if schema_type == "oneOf"
-                    else is_nullable,
+                    "nullable": (
+                        False if schema_type == "oneOf" else is_nullable
+                    ),
                 },
                 "NullableEnum": {
                     "type": "string",
@@ -863,5 +863,10 @@ class TestOAS31ValidatorValidate(BaseTestOASValidatorValidate):
         with pytest.raises(ValidationError) as excinfo:
             validator.validate(value)
 
-        error = "Expected at most 4 items, but found 5"
-        assert error in str(excinfo.value)
+        errors = [
+            # jsonschema < 4.20.0
+            "Expected at most 4 items, but found 5",
+            # jsonschema >= 4.20.0
+            "Expected at most 4 items but found 1 extra",
+        ]
+        assert any(error in str(excinfo.value) for error in errors)
