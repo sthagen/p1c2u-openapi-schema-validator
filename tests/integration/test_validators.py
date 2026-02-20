@@ -1,9 +1,17 @@
 from base64 import b64encode
+from typing import Any
+from typing import cast
 
 import pytest
 from jsonschema import ValidationError
+from jsonschema.exceptions import (
+    _WrappedReferencingError as WrappedReferencingError,
+)
 from referencing import Registry
 from referencing import Resource
+from referencing.exceptions import InvalidAnchor
+from referencing.exceptions import NoSuchAnchor
+from referencing.exceptions import PointerToNowhere
 from referencing.jsonschema import DRAFT202012
 
 from openapi_schema_validator import OAS30ReadValidator
@@ -142,7 +150,7 @@ class BaseTestOASValidatorValidate:
         }
 
         validator = validator_class(schema, registry=registry)
-        result = validator.validate({"name": "John", "age": 23}, schema)
+        result = validator.validate({"name": "John", "age": 23})
 
         assert result is None
 
@@ -354,6 +362,96 @@ class TestOAS30ValidatorValidate(BaseTestOASValidatorValidate):
         assert result is None
 
     @pytest.mark.parametrize(
+        "mapping_ref",
+        [
+            "#/components/schemas/Missing",
+            "#missing-anchor",
+            "#bad/frag",
+        ],
+    )
+    def test_discriminator_handles_unresolvable_reference_kinds(
+        self, mapping_ref
+    ):
+        schema = {
+            "oneOf": [{"$ref": "#/components/schemas/MountainHiking"}],
+            "discriminator": {
+                "propertyName": "discipline",
+                "mapping": {"mountain_hiking": mapping_ref},
+            },
+            "components": {
+                "schemas": {
+                    "MountainHiking": {
+                        "type": "object",
+                        "properties": {
+                            "discipline": {"type": "string"},
+                            "length": {"type": "integer"},
+                        },
+                        "required": ["discipline", "length"],
+                    },
+                },
+            },
+        }
+
+        validator = OAS30Validator(
+            schema,
+            format_checker=oas30_format_checker,
+        )
+        with pytest.raises(
+            ValidationError,
+            match=f"reference '{mapping_ref}' could not be resolved",
+        ):
+            validator.validate(
+                {
+                    "discipline": "mountain_hiking",
+                    "length": 10,
+                }
+            )
+
+    @pytest.mark.parametrize(
+        "mapping_ref, expected_cause",
+        [
+            ("#/components/schemas/Missing", PointerToNowhere),
+            ("#missing-anchor", NoSuchAnchor),
+            ("#bad/frag", InvalidAnchor),
+        ],
+    )
+    def test_discriminator_unresolvable_reference_causes(
+        self, mapping_ref, expected_cause
+    ):
+        schema = {
+            "oneOf": [{"$ref": "#/components/schemas/MountainHiking"}],
+            "discriminator": {
+                "propertyName": "discipline",
+                "mapping": {"mountain_hiking": mapping_ref},
+            },
+            "components": {
+                "schemas": {
+                    "MountainHiking": {
+                        "type": "object",
+                        "properties": {
+                            "discipline": {"type": "string"},
+                            "length": {"type": "integer"},
+                        },
+                        "required": ["discipline", "length"],
+                    },
+                },
+            },
+        }
+
+        validator = OAS30Validator(
+            schema,
+            format_checker=oas30_format_checker,
+        )
+
+        with pytest.raises(WrappedReferencingError) as exc_info:
+            cast(Any, validator)._validate_reference(
+                ref=mapping_ref,
+                instance={"discipline": "mountain_hiking", "length": 10},
+            )
+
+        assert isinstance(exc_info.value.__cause__, expected_cause)
+
+    @pytest.mark.parametrize(
         "schema_type",
         [
             "oneOf",
@@ -450,6 +548,13 @@ class TestOAS30ValidatorValidate(BaseTestOASValidatorValidate):
         validator = validator_class(
             schema, format_checker=oas30_format_checker
         )
+
+        with pytest.raises(
+            ValidationError,
+            match="is not of type 'object'",
+        ):
+            validator.validate("not-an-object")
+
         with pytest.raises(
             ValidationError, match="does not contain discriminating property"
         ):
@@ -669,6 +774,32 @@ class TestOAS30ReadWriteValidatorValidate:
             format_checker=oas30_format_checker,
         )
         assert validator.validate({"another_prop": "hello"}) is None
+
+    def test_read_only_false(self):
+        schema = {
+            "type": "object",
+            "properties": {"some_prop": {"type": "string", "readOnly": False}},
+        }
+
+        validator = OAS30WriteValidator(
+            schema,
+            format_checker=oas30_format_checker,
+        )
+        assert validator.validate({"some_prop": "hello"}) is None
+
+    def test_write_only_false(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "some_prop": {"type": "string", "writeOnly": False}
+            },
+        }
+
+        validator = OAS30ReadValidator(
+            schema,
+            format_checker=oas30_format_checker,
+        )
+        assert validator.validate({"some_prop": "hello"}) is None
 
 
 class TestOAS31ValidatorFormatChecker:
