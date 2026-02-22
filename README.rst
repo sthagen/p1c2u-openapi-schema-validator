@@ -4,8 +4,8 @@ openapi-schema-validator
 
 .. image:: https://img.shields.io/pypi/v/openapi-schema-validator.svg
      :target: https://pypi.python.org/pypi/openapi-schema-validator
-.. image:: https://travis-ci.org/python-openapi/openapi-schema-validator.svg?branch=master
-     :target: https://travis-ci.org/python-openapi/openapi-schema-validator
+.. image:: https://github.com/python-openapi/openapi-schema-validator/actions/workflows/python-tests.yml/badge.svg
+     :target: https://github.com/python-openapi/openapi-schema-validator/actions
 .. image:: https://img.shields.io/codecov/c/github/python-openapi/openapi-schema-validator/master.svg?style=flat
      :target: https://codecov.io/github/python-openapi/openapi-schema-validator?branch=master
 .. image:: https://img.shields.io/pypi/pyversions/openapi-schema-validator.svg
@@ -99,7 +99,56 @@ To validate an OpenAPI v3.1 schema:
 
 By default, the latest OpenAPI schema syntax is expected.
 
+
+Strict vs Pragmatic Validators
+=============================
+
+OpenAPI 3.0 has two validator variants with different behaviors for binary format:
+
+**OAS30Validator (default - pragmatic)**
+   - Accepts Python ``bytes`` for ``type: string`` with ``format: binary``
+   - More lenient for Python use cases where binary data is common
+   - Use when validating Python objects directly
+
+**OAS30StrictValidator**
+   - Follows OAS spec strictly: only accepts ``str`` for ``type: string``
+   - For ``format: binary``, only accepts base64-encoded strings
+   - Use when strict spec compliance is required
+
+Comparison Matrix
+----------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 20 22 23
+
+   * - Schema
+     - Value
+     - OAS30Validator (default)
+     - OAS30StrictValidator
+   * - ``type: string``
+     - ``"test"`` (str)
+     - Pass
+     - Pass
+   * - ``type: string``
+     - ``b"test"`` (bytes)
+     - **Fail**
+     - **Fail**
+   * - ``type: string, format: binary``
+     - ``b"test"`` (bytes)
+     - Pass
+     - **Fail**
+   * - ``type: string, format: binary``
+     - ``"dGVzdA=="`` (base64)
+     - Pass
+     - Pass
+   * - ``type: string, format: binary``
+     - ``"test"`` (plain str)
+     - Pass
+     - **Fail**
+
 For more details read about `Validation <https://openapi-schema-validator.readthedocs.io/en/latest/validation.html>`__.
+
 
 Related projects
 ################
