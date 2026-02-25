@@ -1,16 +1,18 @@
 from openapi_schema_validator._format import oas30_format_checker
 from openapi_schema_validator._format import oas30_strict_format_checker
 from openapi_schema_validator._format import oas31_format_checker
+from openapi_schema_validator._format import oas32_format_checker
 from openapi_schema_validator.shortcuts import validate
 from openapi_schema_validator.validators import OAS30ReadValidator
 from openapi_schema_validator.validators import OAS30StrictValidator
 from openapi_schema_validator.validators import OAS30Validator
 from openapi_schema_validator.validators import OAS30WriteValidator
 from openapi_schema_validator.validators import OAS31Validator
+from openapi_schema_validator.validators import OAS32Validator
 
 __author__ = "Artur Maciag"
 __email__ = "maciag.artur@gmail.com"
-__version__ = "0.6.3"
+__version__ = "0.7.2"
 __url__ = "https://github.com/python-openapi/openapi-schema-validator"
 __license__ = "3-clause BSD License"
 
@@ -24,4 +26,6 @@ __all__ = [
     "oas30_strict_format_checker",
     "OAS31Validator",
     "oas31_format_checker",
+    "OAS32Validator",
+    "oas32_format_checker",
 ]

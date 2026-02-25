@@ -1,3 +1,4 @@
+import warnings
 from base64 import b64encode
 from typing import Any
 from typing import cast
@@ -7,6 +8,9 @@ from jsonschema import ValidationError
 from jsonschema.exceptions import (
     _WrappedReferencingError as WrappedReferencingError,
 )
+from jsonschema.validators import Draft202012Validator
+from jsonschema.validators import extend
+from jsonschema.validators import validator_for
 from referencing import Registry
 from referencing import Resource
 from referencing.exceptions import InvalidAnchor
@@ -19,9 +23,14 @@ from openapi_schema_validator import OAS30StrictValidator
 from openapi_schema_validator import OAS30Validator
 from openapi_schema_validator import OAS30WriteValidator
 from openapi_schema_validator import OAS31Validator
+from openapi_schema_validator import OAS32Validator
 from openapi_schema_validator import oas30_format_checker
 from openapi_schema_validator import oas30_strict_format_checker
 from openapi_schema_validator import oas31_format_checker
+from openapi_schema_validator import oas32_format_checker
+from openapi_schema_validator._dialects import OAS31_BASE_DIALECT_METASCHEMA
+from openapi_schema_validator._dialects import register_openapi_dialect
+from openapi_schema_validator.validators import OAS31_BASE_DIALECT_ID
 
 
 class TestOAS30ValidatorFormatChecker:
@@ -467,8 +476,8 @@ class TestOAS30ValidatorValidate(BaseTestOASValidatorValidate):
                 "properties": {
                     "discipline": {
                         "type": "string",
-                        # we allow both the explicitely matched mountain_hiking discipline
-                        # and the implicitely matched MoutainHiking discipline
+                        # we allow both the explicitly matched mountain_hiking discipline
+                        # and the implicitly matched MoutainHiking discipline
                         "enum": ["mountain_hiking", "MountainHiking"],
                     },
                     "length": {
@@ -499,7 +508,7 @@ class TestOAS30ValidatorValidate(BaseTestOASValidatorValidate):
             {"$ref": "#/components/schemas/AlpineClimbing"},
         ]
 
-        # Add the compoments in a minimalis schema
+        # Add the components in a minimalis schema
         schema = {
             "$ref": "#/components/schemas/Route",
             "components": {"schemas": components},
@@ -1003,6 +1012,66 @@ class TestOAS31ValidatorValidate(BaseTestOASValidatorValidate):
         assert any(error in str(excinfo.value) for error in errors)
 
 
+class TestOAS32ValidatorValidate(TestOAS31ValidatorValidate):
+    """OAS 3.2 uses the same JSON Schema dialect as 3.1."""
+
+    @pytest.fixture
+    def validator_class(self):
+        return OAS32Validator
+
+    @pytest.fixture
+    def format_checker(self):
+        return oas32_format_checker
+
+    def test_validator_is_distinct_from_oas31(self):
+        assert OAS32Validator is not OAS31Validator
+
+    def test_format_checker_is_distinct_from_oas31(self):
+        assert oas32_format_checker is not oas31_format_checker
+
+    def test_validator_shares_oas31_behavior(self):
+        assert OAS32Validator.VALIDATORS == OAS31Validator.VALIDATORS
+
+    def test_format_validation_int32(self, validator_class):
+        schema = {"type": "integer", "format": "int32"}
+        validator = validator_class(
+            schema, format_checker=oas32_format_checker
+        )
+
+        result = validator.validate(42)
+        assert result is None
+
+        with pytest.raises(ValidationError):
+            validator.validate(9999999999)
+
+    def test_format_validation_date(self, validator_class):
+        schema = {"type": "string", "format": "date"}
+        validator = validator_class(
+            schema, format_checker=oas32_format_checker
+        )
+
+        result = validator.validate("2024-01-15")
+        assert result is None
+
+        with pytest.raises(ValidationError):
+            validator.validate("not-a-date")
+
+    def test_schema_with_allof(self, validator_class):
+        schema = {
+            "allOf": [
+                {"type": "object", "properties": {"id": {"type": "integer"}}},
+                {"type": "object", "properties": {"name": {"type": "string"}}},
+            ]
+        }
+        validator = validator_class(schema)
+
+        result = validator.validate({"id": 1, "name": "test"})
+        assert result is None
+
+        with pytest.raises(ValidationError):
+            validator.validate({"id": "not-an-integer"})
+
+
 class TestOAS30StrictValidator:
     """
     Tests for OAS30StrictValidator which follows OAS spec strictly:
@@ -1051,3 +1120,84 @@ class TestOAS30StrictValidator:
         # Note: "test" is actually valid base64, so use "not base64" which is not
         with pytest.raises(ValidationError, match="is not a 'binary'"):
             validator.validate("not base64")
+
+
+class TestValidatorForDiscovery:
+    def test_oas31_base_dialect_resolves_to_oas31_validator(self):
+        schema = {"$schema": OAS31_BASE_DIALECT_ID}
+
+        validator_class = validator_for(schema)
+
+        assert validator_class is OAS31Validator
+
+    def test_oas31_base_dialect_discovery_has_no_deprecation_warning(self):
+        schema = {"$schema": OAS31_BASE_DIALECT_ID}
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            validator_for(schema)
+
+        assert not any(
+            issubclass(warning.category, DeprecationWarning)
+            for warning in caught
+        )
+
+    def test_oas31_base_dialect_keeps_oas_keyword_behavior(self):
+        schema = {
+            "$schema": OAS31_BASE_DIALECT_ID,
+            "type": "object",
+            "required": ["kind"],
+            "properties": {"kind": {"type": "string"}},
+            "discriminator": {"propertyName": "kind"},
+            "xml": {"name": "Pet"},
+            "example": {"kind": "cat"},
+        }
+
+        validator_class = validator_for(schema)
+        validator = validator_class(
+            schema, format_checker=oas31_format_checker
+        )
+
+        result = validator.validate({"kind": "cat"})
+
+        assert result is None
+
+    def test_draft_2020_12_discovery_is_unchanged(self):
+        schema = {"$schema": "https://json-schema.org/draft/2020-12/schema"}
+
+        validator_class = validator_for(schema)
+
+        assert validator_class is Draft202012Validator
+
+    def test_openapi_dialect_registration_is_idempotent(self):
+        register_openapi_dialect(
+            validator=OAS31Validator,
+            dialect_id=OAS31_BASE_DIALECT_ID,
+            version_name="oas31",
+            metaschema=OAS31_BASE_DIALECT_METASCHEMA,
+        )
+        register_openapi_dialect(
+            validator=OAS31Validator,
+            dialect_id=OAS31_BASE_DIALECT_ID,
+            version_name="oas31",
+            metaschema=OAS31_BASE_DIALECT_METASCHEMA,
+        )
+
+        validator_class = validator_for({"$schema": OAS31_BASE_DIALECT_ID})
+
+        assert validator_class is OAS31Validator
+
+    def test_openapi_dialect_registration_does_not_replace_validator(self):
+        another_oas31_validator = extend(OAS31Validator, {})
+
+        registered_validator = register_openapi_dialect(
+            validator=another_oas31_validator,
+            dialect_id=OAS31_BASE_DIALECT_ID,
+            version_name="oas31",
+            metaschema=OAS31_BASE_DIALECT_METASCHEMA,
+        )
+
+        assert registered_validator is OAS31Validator
+        assert (
+            validator_for({"$schema": OAS31_BASE_DIALECT_ID}) is OAS31Validator
+        )

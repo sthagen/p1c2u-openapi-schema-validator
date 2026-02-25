@@ -22,6 +22,7 @@ Openapi-schema-validator is a Python library that validates schema against:
 
 * `OpenAPI Schema Specification v3.0 <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.0.md#schemaObject>`__ which is an extended subset of the `JSON Schema Specification Wright Draft 00 <http://json-schema.org/>`__.
 * `OpenAPI Schema Specification v3.1 <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.1.0.md#schemaObject>`__ which is an extended superset of the `JSON Schema Specification Draft 2020-12 <http://json-schema.org/>`__.
+* `OpenAPI Schema Specification v3.2 <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.2.0.md#schemaObject>`__ which uses the same JSON Schema dialect as v3.1.
 
 
 Documentation
@@ -99,9 +100,29 @@ To validate an OpenAPI v3.1 schema:
 
 By default, the latest OpenAPI schema syntax is expected.
 
+The OpenAPI 3.1 base dialect URI is registered for
+``jsonschema.validators.validator_for`` resolution.
+Schemas declaring
+``"$schema": "https://spec.openapis.org/oas/3.1/dialect/base"``
+resolve directly to ``OAS31Validator`` without unresolved-metaschema
+fallback warnings.
+
+.. code-block:: python
+
+   from jsonschema.validators import validator_for
+
+   from openapi_schema_validator import OAS31Validator
+
+   schema = {
+       "$schema": "https://spec.openapis.org/oas/3.1/dialect/base",
+       "type": "object",
+   }
+
+   assert validator_for(schema) is OAS31Validator
+
 
 Strict vs Pragmatic Validators
-=============================
+==============================
 
 OpenAPI 3.0 has two validator variants with different behaviors for binary format:
 
@@ -116,7 +137,7 @@ OpenAPI 3.0 has two validator variants with different behaviors for binary forma
    - Use when strict spec compliance is required
 
 Comparison Matrix
-----------------
+-----------------
 
 .. list-table::
    :header-rows: 1
