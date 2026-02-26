@@ -22,7 +22,7 @@ Openapi-schema-validator is a Python library that validates schema against:
 
 * `OpenAPI Schema Specification v3.0 <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.0.md#schemaObject>`__ which is an extended subset of the `JSON Schema Specification Wright Draft 00 <http://json-schema.org/>`__.
 * `OpenAPI Schema Specification v3.1 <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.1.0.md#schemaObject>`__ which is an extended superset of the `JSON Schema Specification Draft 2020-12 <http://json-schema.org/>`__.
-* `OpenAPI Schema Specification v3.2 <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.2.0.md#schemaObject>`__ which uses the same JSON Schema dialect as v3.1.
+* `OpenAPI Schema Specification v3.2 <https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.2.0.md#schemaObject>`__ using the published OAS 3.2 JSON Schema dialect resources.
 
 
 Documentation
@@ -50,7 +50,18 @@ Alternatively you can download the code and install from the repository:
 Usage
 #####
 
-To validate an OpenAPI v3.1 schema:
+``validate`` call signature is:
+
+.. code-block:: python
+
+   validate(instance, schema, cls=OAS32Validator, **kwargs)
+
+The first argument is always the value you want to validate.
+The second argument is always the OpenAPI schema object.
+The ``cls`` keyword argument is optional and defaults to ``OAS32Validator``.
+Use ``cls`` when you need a specific validator version/behavior.
+
+To validate an OpenAPI schema:
 
 .. code-block:: python
 
@@ -100,73 +111,109 @@ To validate an OpenAPI v3.1 schema:
 
 By default, the latest OpenAPI schema syntax is expected.
 
-The OpenAPI 3.1 base dialect URI is registered for
+Default dialect resolution
+--------------------------
+
+The OpenAPI 3.1 and 3.2 base dialect URIs are registered for
 ``jsonschema.validators.validator_for`` resolution.
-Schemas declaring
-``"$schema": "https://spec.openapis.org/oas/3.1/dialect/base"``
-resolve directly to ``OAS31Validator`` without unresolved-metaschema
-fallback warnings.
+Schemas declaring ``"$schema"`` as either
+``"https://spec.openapis.org/oas/3.1/dialect/base"`` or
+``"https://spec.openapis.org/oas/3.2/dialect/2025-09-17"`` resolve
+directly to ``OAS31Validator`` and ``OAS32Validator`` without
+unresolved-metaschema fallback warnings.
 
 .. code-block:: python
 
    from jsonschema.validators import validator_for
 
    from openapi_schema_validator import OAS31Validator
+   from openapi_schema_validator import OAS32Validator
 
    schema = {
        "$schema": "https://spec.openapis.org/oas/3.1/dialect/base",
        "type": "object",
    }
+   schema32 = {
+       "$schema": "https://spec.openapis.org/oas/3.2/dialect/2025-09-17",
+       "type": "object",
+   }
 
    assert validator_for(schema) is OAS31Validator
+   assert validator_for(schema32) is OAS32Validator
 
+Binary Data Semantics
+=====================
 
-Strict vs Pragmatic Validators
-==============================
+The handling of binary-like payloads differs between OpenAPI versions.
 
-OpenAPI 3.0 has two validator variants with different behaviors for binary format:
+OpenAPI 3.0
+-----------
 
-**OAS30Validator (default - pragmatic)**
-   - Accepts Python ``bytes`` for ``type: string`` with ``format: binary``
-   - More lenient for Python use cases where binary data is common
-   - Use when validating Python objects directly
+OpenAPI 3.0 keeps historical ``format: binary`` / ``format: byte`` usage on
+``type: string``.
+
+**OAS30Validator (default - compatibility behavior)**
+   - ``type: string`` accepts ``str``
+   - ``type: string, format: binary`` accepts Python ``bytes`` and strings
+   - useful when validating Python-native runtime data
 
 **OAS30StrictValidator**
-   - Follows OAS spec strictly: only accepts ``str`` for ``type: string``
-   - For ``format: binary``, only accepts base64-encoded strings
-   - Use when strict spec compliance is required
+   - ``type: string`` accepts ``str`` only
+   - ``type: string, format: binary`` uses strict format validation
+   - use when you want strict, spec-oriented behavior for 3.0 schemas
 
-Comparison Matrix
------------------
+OpenAPI 3.1+
+------------
+
+OpenAPI 3.1+ follows JSON Schema semantics for string typing in this library.
+
+- ``type: string`` accepts ``str`` only (not ``bytes``)
+- ``format: binary`` and ``format: byte`` are not treated as built-in formats
+- for base64-in-JSON, model with ``contentEncoding: base64`` (optionally
+  ``contentMediaType``)
+- for raw binary payloads, model via media type (for example
+  ``application/octet-stream``) rather than schema string formats
+
+Quick Reference
+---------------
 
 .. list-table::
    :header-rows: 1
-   :widths: 35 20 22 23
+   :widths: 28 24 24 24
 
-   * - Schema
-     - Value
-     - OAS30Validator (default)
-     - OAS30StrictValidator
-   * - ``type: string``
-     - ``"test"`` (str)
+   * - Context
+     - ``"text"`` (str)
+     - ``b"text"`` (bytes)
+     - Notes
+   * - OAS 3.0 + ``OAS30Validator``
      - Pass
+     - Pass for ``format: binary``
+     - Compatibility behavior for Python runtime payloads
+   * - OAS 3.0 + ``OAS30StrictValidator``
      - Pass
-   * - ``type: string``
-     - ``b"test"`` (bytes)
-     - **Fail**
-     - **Fail**
-   * - ``type: string, format: binary``
-     - ``b"test"`` (bytes)
+     - Fail
+     - Strict 3.0 validation mode
+   * - OAS 3.1 + ``OAS31Validator``
      - Pass
-     - **Fail**
-   * - ``type: string, format: binary``
-     - ``"dGVzdA=="`` (base64)
+     - Fail
+     - Use ``contentEncoding``/``contentMediaType`` and media types
+   * - OAS 3.2 + ``OAS32Validator``
      - Pass
-     - Pass
-   * - ``type: string, format: binary``
-     - ``"test"`` (plain str)
-     - Pass
-     - **Fail**
+     - Fail
+     - Same semantics as OAS 3.1
+
+
+Regex Behavior
+==============
+
+By default, ``pattern`` handling follows host Python regex behavior.
+For ECMAScript-oriented regex validation and matching (via ``regress``),
+install the optional extra:
+
+.. code-block:: console
+
+   pip install "openapi-schema-validator[ecma-regex]"
+
 
 For more details read about `Validation <https://openapi-schema-validator.readthedocs.io/en/latest/validation.html>`__.
 

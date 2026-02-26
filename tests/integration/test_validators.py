@@ -1,9 +1,12 @@
+import re
 import warnings
 from base64 import b64encode
 from typing import Any
 from typing import cast
+from unittest.mock import patch
 
 import pytest
+from jsonschema import SchemaError
 from jsonschema import ValidationError
 from jsonschema.exceptions import (
     _WrappedReferencingError as WrappedReferencingError,
@@ -28,9 +31,13 @@ from openapi_schema_validator import oas30_format_checker
 from openapi_schema_validator import oas30_strict_format_checker
 from openapi_schema_validator import oas31_format_checker
 from openapi_schema_validator import oas32_format_checker
+from openapi_schema_validator import validate
+from openapi_schema_validator._dialects import OAS31_BASE_DIALECT_ID
 from openapi_schema_validator._dialects import OAS31_BASE_DIALECT_METASCHEMA
+from openapi_schema_validator._dialects import OAS32_BASE_DIALECT_ID
+from openapi_schema_validator._dialects import OAS32_BASE_DIALECT_METASCHEMA
 from openapi_schema_validator._dialects import register_openapi_dialect
-from openapi_schema_validator.validators import OAS31_BASE_DIALECT_ID
+from openapi_schema_validator._regex import has_ecma_regex
 
 
 class TestOAS30ValidatorFormatChecker:
@@ -119,6 +126,59 @@ class BaseTestOASValidatorValidate:
 
         with pytest.raises(ValidationError):
             validator.validate(value)
+
+    def test_invalid_pattern_raises_expected_error(self, validator_class):
+        schema = {"type": "string", "pattern": "["}
+        validator = validator_class(schema)
+
+        if has_ecma_regex():
+            with pytest.raises(
+                ValidationError,
+                match="is not a valid regular expression",
+            ):
+                validator.validate("foo")
+        else:
+            with pytest.raises(re.error):
+                validator.validate("foo")
+
+    def test_invalid_pattern_rejected_by_validate_helper(
+        self, validator_class
+    ):
+        schema = {"type": "string", "pattern": "["}
+
+        with pytest.raises(SchemaError, match="is not a 'regex'"):
+            validate("foo", schema, cls=validator_class)
+
+    @pytest.mark.skipif(
+        not has_ecma_regex(), reason="requires optional ecma-regex extra"
+    )
+    def test_z_escape_behaves_as_ecma_literal_escape(self, validator_class):
+        schema = {"type": "string", "pattern": r"^foo\z"}
+        validator = validator_class(schema)
+
+        with pytest.raises(ValidationError, match="does not match"):
+            validator.validate("foo")
+
+        result = validator.validate("fooz")
+
+        assert result is None
+
+        result = validate("fooz", schema, cls=validator_class)
+
+        assert result is None
+
+    @pytest.mark.skipif(
+        not has_ecma_regex(), reason="requires optional ecma-regex extra"
+    )
+    def test_escaped_z_pattern_is_allowed_with_ecma_regex(
+        self, validator_class
+    ):
+        schema = {"type": "string", "pattern": r"^foo\\z$"}
+        validator = validator_class(schema)
+
+        result = validator.validate(r"foo\z")
+
+        assert result is None
 
     def test_referencing(self, validator_class):
         name_schema = Resource.from_contents(
@@ -293,6 +353,10 @@ class TestOAS30ValidatorValidate(BaseTestOASValidatorValidate):
         "value",
         [
             b64encode(b"string").decode(),
+            b64encode(b"\x00\x01\x02").decode(),
+            "",
+            "AQ==",
+            "SGVsbG8=",
         ],
     )
     def test_string_format_byte_valid(self, validator_class, value):
@@ -305,7 +369,19 @@ class TestOAS30ValidatorValidate(BaseTestOASValidatorValidate):
 
         assert result is None
 
-    @pytest.mark.parametrize("value", ["string"])
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "string",
+            "SGVsbG8",
+            "SGVsbG8===",
+            "SGVsbG8$",
+            "SGVsbG8 ",
+            "SGVsbG8\n",
+            "SGVsbG8_",
+            "SGVsbG8-",
+        ],
+    )
     def test_string_format_byte_invalid(self, validator_class, value):
         schema = {"type": "string", "format": "byte"}
         validator = validator_class(
@@ -847,6 +923,26 @@ class TestOAS31ValidatorValidate(BaseTestOASValidatorValidate):
         with pytest.raises(ValidationError):
             validator.validate(value)
 
+    @pytest.mark.parametrize("value", [b"test"])
+    def test_string_binary_rejects_bytes(
+        self, validator_class, format_checker, value
+    ):
+        schema = {"type": "string", "format": "binary"}
+        validator = validator_class(schema, format_checker=format_checker)
+
+        with pytest.raises(ValidationError):
+            validator.validate(value)
+
+    @pytest.mark.parametrize("value", [True, 3, 3.12, None])
+    def test_string_binary_invalid(
+        self, validator_class, format_checker, value
+    ):
+        schema = {"type": "string", "format": "binary"}
+        validator = validator_class(schema, format_checker=format_checker)
+
+        with pytest.raises(ValidationError):
+            validator.validate(value)
+
     @pytest.mark.parametrize(
         "schema_type",
         [
@@ -1013,7 +1109,7 @@ class TestOAS31ValidatorValidate(BaseTestOASValidatorValidate):
 
 
 class TestOAS32ValidatorValidate(TestOAS31ValidatorValidate):
-    """OAS 3.2 uses the same JSON Schema dialect as 3.1."""
+    """OAS 3.2 uses the OAS 3.2 published dialect resources."""
 
     @pytest.fixture
     def validator_class(self):
@@ -1031,6 +1127,9 @@ class TestOAS32ValidatorValidate(TestOAS31ValidatorValidate):
 
     def test_validator_shares_oas31_behavior(self):
         assert OAS32Validator.VALIDATORS == OAS31Validator.VALIDATORS
+
+    def test_validator_has_oas32_dialect_metaschema(self):
+        assert OAS32Validator.META_SCHEMA["$id"] == OAS32_BASE_DIALECT_ID
 
     def test_format_validation_int32(self, validator_class):
         schema = {"type": "integer", "format": "int32"}
@@ -1070,6 +1169,43 @@ class TestOAS32ValidatorValidate(TestOAS31ValidatorValidate):
 
         with pytest.raises(ValidationError):
             validator.validate({"id": "not-an-integer"})
+
+    def test_check_schema_accepts_oas32_discriminator_default_mapping(self):
+        schema = {
+            "type": "object",
+            "discriminator": {
+                "propertyName": "kind",
+                "defaultMapping": "#/components/schemas/Pet",
+            },
+        }
+
+        OAS32Validator.check_schema(schema)
+
+    def test_oas31_check_schema_rejects_discriminator_default_mapping(self):
+        schema = {
+            "type": "object",
+            "discriminator": {
+                "propertyName": "kind",
+                "defaultMapping": "#/components/schemas/Pet",
+            },
+        }
+
+        with pytest.raises(SchemaError):
+            OAS31Validator.check_schema(schema)
+
+    def test_oas32_check_schema_does_not_fetch_remote_metaschemas(self):
+        schema = {
+            "type": "object",
+            "discriminator": {
+                "propertyName": "kind",
+                "defaultMapping": "#/components/schemas/Pet",
+            },
+        }
+
+        with patch("urllib.request.urlopen") as urlopen:
+            OAS32Validator.check_schema(schema)
+
+        urlopen.assert_not_called()
 
 
 class TestOAS30StrictValidator:
@@ -1142,6 +1278,25 @@ class TestValidatorForDiscovery:
             for warning in caught
         )
 
+    def test_oas32_base_dialect_resolves_to_oas32_validator(self):
+        schema = {"$schema": OAS32_BASE_DIALECT_ID}
+
+        validator_class = validator_for(schema)
+
+        assert validator_class is OAS32Validator
+
+    def test_oas32_base_dialect_discovery_has_no_deprecation_warning(self):
+        schema = {"$schema": OAS32_BASE_DIALECT_ID}
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            validator_for(schema)
+
+        assert not any(
+            issubclass(warning.category, DeprecationWarning)
+            for warning in caught
+        )
+
     def test_oas31_base_dialect_keeps_oas_keyword_behavior(self):
         schema = {
             "$schema": OAS31_BASE_DIALECT_ID,
@@ -1201,3 +1356,21 @@ class TestValidatorForDiscovery:
         assert (
             validator_for({"$schema": OAS31_BASE_DIALECT_ID}) is OAS31Validator
         )
+
+    def test_openapi_oas32_dialect_registration_is_idempotent(self):
+        register_openapi_dialect(
+            validator=OAS32Validator,
+            dialect_id=OAS32_BASE_DIALECT_ID,
+            version_name="oas32",
+            metaschema=OAS32_BASE_DIALECT_METASCHEMA,
+        )
+        register_openapi_dialect(
+            validator=OAS32Validator,
+            dialect_id=OAS32_BASE_DIALECT_ID,
+            version_name="oas32",
+            metaschema=OAS32_BASE_DIALECT_METASCHEMA,
+        )
+
+        validator_class = validator_for({"$schema": OAS32_BASE_DIALECT_ID})
+
+        assert validator_class is OAS32Validator

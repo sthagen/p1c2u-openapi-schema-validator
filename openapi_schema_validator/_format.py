@@ -5,6 +5,8 @@ from numbers import Number
 
 from jsonschema._format import FormatChecker
 
+from openapi_schema_validator._regex import is_valid_regex
+
 
 def is_int32(instance: object) -> bool:
     # bool inherits from int, so ensure bools aren't reported as ints
@@ -68,15 +70,24 @@ def is_byte(instance: object) -> bool:
     if not isinstance(instance, (str, bytes)):
         return True
     if isinstance(instance, str):
-        instance = instance.encode()
+        instance = instance.encode("ascii", errors="strict")
 
-    encoded = b64encode(b64decode(instance))
-    return encoded == instance
+    try:
+        b64decode(instance, validate=True)
+    except (binascii.Error, ValueError):
+        return False
+    return True
 
 
 def is_password(instance: object) -> bool:
     # A hint to UIs to obscure input
     return True
+
+
+def is_regex(instance: object) -> bool:
+    if not isinstance(instance, str):
+        return True
+    return is_valid_regex(instance)
 
 
 oas30_format_checker = FormatChecker()
@@ -87,6 +98,7 @@ oas30_format_checker.checks("double")(is_double)
 oas30_format_checker.checks("binary")(is_binary_pragmatic)
 oas30_format_checker.checks("byte", (binascii.Error, TypeError))(is_byte)
 oas30_format_checker.checks("password")(is_password)
+oas30_format_checker.checks("regex")(is_regex)
 
 oas30_strict_format_checker = FormatChecker()
 oas30_strict_format_checker.checks("int32")(is_int32)
@@ -98,6 +110,7 @@ oas30_strict_format_checker.checks("byte", (binascii.Error, TypeError))(
     is_byte
 )
 oas30_strict_format_checker.checks("password")(is_password)
+oas30_strict_format_checker.checks("regex")(is_regex)
 
 oas31_format_checker = FormatChecker()
 oas31_format_checker.checks("int32")(is_int32)
@@ -105,6 +118,7 @@ oas31_format_checker.checks("int64")(is_int64)
 oas31_format_checker.checks("float")(is_float)
 oas31_format_checker.checks("double")(is_double)
 oas31_format_checker.checks("password")(is_password)
+oas31_format_checker.checks("regex")(is_regex)
 
 # OAS 3.2 uses the same format checks as OAS 3.1
 oas32_format_checker = FormatChecker()
@@ -113,3 +127,4 @@ oas32_format_checker.checks("int64")(is_int64)
 oas32_format_checker.checks("float")(is_float)
 oas32_format_checker.checks("double")(is_double)
 oas32_format_checker.checks("password")(is_password)
+oas32_format_checker.checks("regex")(is_regex)
